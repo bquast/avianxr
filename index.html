@@ -1,6 +1,6 @@
 <!doctype html>
-<html lang="en" class="dark">
-  <head>
+<html lang="en">
+<head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>AvianXR — Quest 3 Bird Tracker</title>
@@ -12,9 +12,207 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Outfit:wght@600;700&family=Plus+Jakarta+Sans:wght@400;600&display=swap" rel="stylesheet" />
-  </head>
-  <body class="bg-slate-950 text-slate-100 antialiased selection:bg-amber-500/30 selection:text-amber-200 overflow-hidden">
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
+    <link rel="stylesheet" href="./style.css" />
+</head>
+<body data-state="field">
+    <canvas id="xr-canvas" data-testid="xr-bird-canvas" aria-label="3D Bird Tracking Viewport"></canvas>
+
+    <div id="hud">
+        <!-- 3-Zone Top Bar: Brand | Single-line Nav | Primary Action -->
+        <header class="topbar interactive">
+            <a href="#field" id="brand-link" class="brand">AvianXR</a>
+
+            <nav class="topnav" aria-label="Primary sections">
+                <button type="button" class="navlink" data-panel="field" aria-current="page">Field Optics</button>
+                <button type="button" class="navlink" data-panel="log" id="nav-log-btn">Sightings (2)</button>
+                <button type="button" class="navlink" data-panel="nearby">Nearby Feed</button>
+                <button type="button" class="navlink" data-panel="guide">Quest 3 Info</button>
+            </nav>
+
+            <button type="button" id="xr-btn" class="btn btn-primary">Enter Quest 3 AR</button>
+        </header>
+
+        <nav class="mobilenav interactive" aria-label="Mobile sections">
+            <button type="button" class="navlink" data-panel="field" aria-current="page">Field</button>
+            <button type="button" class="navlink" data-panel="log" id="mnav-log-btn">Sightings (2)</button>
+            <button type="button" class="navlink" data-panel="nearby">Nearby</button>
+            <button type="button" class="navlink" data-panel="guide">Quest 3</button>
+        </nav>
+
+        <main class="stage">
+            <div class="bearing-bar" id="bearing-bar">
+                <span id="hud-bearing">N 000°</span>
+                <span class="sep" aria-hidden="true">·</span>
+                <span id="hud-pitch">Elev +14°</span>
+                <span class="sep" aria-hidden="true">·</span>
+                <span id="hud-scope">1x Scope</span>
+                <span class="sep" aria-hidden="true">·</span>
+                <span id="hud-fov">6/12 in FOV</span>
+            </div>
+
+            <div id="toast" role="status" class="toast interactive hidden">
+                <span id="toast-text"></span>
+                <button type="button" id="toast-close" class="btn btn-ghost" aria-label="Dismiss notification">Close</button>
+            </div>
+
+            <div id="target-callout" class="callout hidden" aria-hidden="true"></div>
+
+            <div id="reticle" class="reticle" aria-hidden="true">
+                <span class="tl"></span>
+                <span class="tr"></span>
+                <span class="bl"></span>
+                <span class="br"></span>
+                <span class="dot"></span>
+            </div>
+
+            <!-- Manual 3D Sky Waypoint Dialog -->
+            <form id="pin-form" aria-label="Drop 3D Sky Waypoint" class="panel panel-sm interactive hidden">
+                <div style="display:flex;align-items:center;justify-content:space-between;">
+                    <h2 class="panel-title">Drop 3D Sighting Waypoint</h2>
+                    <button type="button" id="pin-cancel-top" class="btn btn-ghost">Cancel</button>
+                </div>
+
+                <div class="field-group">
+                    <label for="pin-species" class="field-label">Observed Species</label>
+                    <select id="pin-species" class="select"></select>
+                </div>
+
+                <div class="field-group">
+                    <label for="pin-note" class="field-label">Field Observation Note</label>
+                    <input id="pin-note" type="text" class="input" placeholder="e.g. Hovering 20m over marsh reeds" />
+                    <p id="pin-err" role="alert" class="err-msg hidden">Enter a brief field note before saving.</p>
+                </div>
+
+                <div style="display:flex;justify-content:flex-end;gap:0.5rem;margin-top:1rem;">
+                    <button type="button" id="pin-cancel-btn" class="btn btn-ghost">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save 3D Pin</button>
+                </div>
+            </form>
+
+            <!-- Panel: Sightings Log -->
+            <section id="panel-log" aria-label="Sightings Log" class="panel interactive hidden">
+                <div class="panel-head">
+                    <div>
+                        <h2 class="panel-title">Recorded Field Sightings</h2>
+                        <p class="panel-sub" id="log-summary">2 spatial records · Quest 3 ray locks and optical bearings</p>
+                    </div>
+                    <div style="display:flex;gap:0.5rem;">
+                        <button type="button" id="export-csv-btn" class="btn btn-primary">Download CSV</button>
+                        <button type="button" class="btn" data-close-panel="1">Return to Field</button>
+                    </div>
+                </div>
+                <div class="panel-body" id="log-body"></div>
+            </section>
+
+            <!-- Panel: Nearby Feed (Direct CORS iNaturalist API + offline seed) -->
+            <section id="panel-nearby" aria-label="Nearby Bird Observations" class="panel interactive hidden">
+                <div class="panel-head">
+                    <div>
+                        <h2 class="panel-title">Regional Avian Observations</h2>
+                        <p class="panel-sub" id="nearby-sub">Source: Public iNaturalist Aves · Spawn species into sky</p>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:0.5rem;">
+                        <label for="region-select" class="sr-only">Flyway Sector</label>
+                        <select id="region-select" class="select select-compact">
+                            <option value="0">San Francisco Bay, CA</option>
+                            <option value="1">Cape May Marsh, NJ</option>
+                            <option value="2">Texel Wadden Coast, NL</option>
+                            <option value="3">Bosque del Apache, NM</option>
+                        </select>
+                        <button type="button" class="btn" data-close-panel="1">Return to Field</button>
+                    </div>
+                </div>
+                <div class="panel-body" id="nearby-body"></div>
+            </section>
+
+            <!-- Panel: Quest 3 & Static Hosting Info -->
+            <section id="panel-guide" aria-label="Quest 3 Setup and Hosting Guide" class="panel interactive hidden">
+                <div class="panel-head">
+                    <div>
+                        <h2 class="panel-title">Meta Quest 3 WebXR &amp; Static Hosting</h2>
+                        <p class="panel-sub" id="xr-cap-status">Checking navigator.xr immersive-ar support...</p>
+                    </div>
+                    <button type="button" class="btn" data-close-panel="1">Return to Field</button>
+                </div>
+                <div class="panel-body">
+                    <div class="guide-grid">
+                        <div>
+                            <h3>01. Quest 3 Passthrough Controls</h3>
+                            <p>Open this HTTPS URL in <strong>Meta Quest Browser</strong> and tap <strong>Enter Quest 3 AR</strong>. WebGL2 clears with alpha 0 so full-color Quest 3 stereo passthrough stays visible behind the 360° compass ring and 3D flight vectors.</p>
+                            <p><strong>Trigger or Hand Pinch:</strong> Pinch on a simulated bird to lock it, or pinch repeatedly along a real bird in open sky to compute its live α-β velocity vector and lead trajectory.</p>
+                        </div>
+                        <div>
+                            <h3>02. Zero-Build GitHub Pages Classic</h3>
+                            <p>Plain ES modules, raw WebGL2, and plain CSS right in root (<span class="mono">index.html</span>, <span class="mono">style.css</span>, <span class="mono">birds.js</span>, <span class="mono">app.js</span>) with <span class="mono">.nojekyll</span> — zero framework or bundler required:</p>
+                            <pre class="code-box">git push origin main
+# GitHub Settings -> Pages -> Deploy from branch: main / (root)</pre>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Bottom Field HUD -->
+        <footer class="bottombar">
+            <div class="target-card interactive">
+                <div id="tracked-box">
+                    <div class="target-head">
+                        <div style="min-width:0;">
+                            <h2 class="target-name" id="tr-name">American Kestrel</h2>
+                            <p class="target-meta" id="tr-meta"><i>Falco sparverius</i> · α-β Track Locked</p>
+                        </div>
+                        <span class="mono" style="font-size:0.75rem;color:var(--accent);" id="tr-id">#1</span>
+                    </div>
+                    <div class="metrics-grid">
+                        <div>
+                            <div class="metric-lbl">Bearing</div>
+                            <div class="metric-val" id="tr-az">0.0°</div>
+                        </div>
+                        <div>
+                            <div class="metric-lbl">Elev</div>
+                            <div class="metric-val" id="tr-el">+0.0°</div>
+                        </div>
+                        <div>
+                            <div class="metric-lbl">Range</div>
+                            <div class="metric-val" id="tr-rng">0.0 m</div>
+                        </div>
+                        <div>
+                            <div class="metric-lbl">Speed</div>
+                            <div class="metric-val" id="tr-spd">0.0 m/s</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="target-actions">
+                    <button type="button" id="btn-lock" class="btn">Lock Nearest</button>
+                    <button type="button" id="btn-next" class="btn">Next Bird</button>
+                    <button type="button" id="btn-log" class="btn btn-primary">Log Sighting</button>
+                    <button type="button" id="btn-pin" class="btn btn-ghost">+ Sky Pin</button>
+                </div>
+            </div>
+
+            <div class="optics-bar interactive">
+                <div role="group" aria-label="Optical Magnification" class="seg-group">
+                    <button type="button" class="seg-btn mono" data-zoom="1" aria-pressed="true">1x</button>
+                    <button type="button" class="seg-btn mono" data-zoom="2" aria-pressed="false">2x</button>
+                    <button type="button" class="seg-btn mono" data-zoom="4" aria-pressed="false">4x</button>
+                </div>
+
+                <div role="group" aria-label="Environment Mode" class="seg-group">
+                    <button type="button" class="seg-btn mode-btn" data-ar-sim="0" aria-pressed="true">Meadow</button>
+                    <button type="button" class="seg-btn mode-btn" data-ar-sim="1" aria-pressed="false">AR Sky</button>
+                </div>
+
+                <div>
+                    <label for="species-filter" class="sr-only">Filter Species</label>
+                    <select id="species-filter" class="select select-compact">
+                        <option value="all">All Birds (6)</option>
+                    </select>
+                </div>
+            </div>
+        </footer>
+    </div>
+
+    <script type="module" src="./app.js"></script>
+</body>
 </html>
