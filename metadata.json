@@ -1,0 +1,6 @@
+{
+  "name": "AvianXR — Quest 3 Bird Tracker",
+  "description": "Minimalist WebXR augmented reality bird tracking PoC for Meta Quest 3 and web browsers, built in a flat functional K&R style with raw WebGL2.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
